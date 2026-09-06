@@ -49,14 +49,20 @@ def segment_returns(reward: np.ndarray, starts: np.ndarray, segment_size: int = 
 
 
 def build_pairs(data: dict, n_pairs: int = N_PAIRS, segment_size: int = SEGMENT_SIZE,
-                discount: float = 1.0, tie_margin: float = 0.0, seed: int = 0) -> dict:
+                discount: float = 1.0, tie_margin: float = 0.0, seed: int = 0,
+                candidate_starts: np.ndarray | None = None) -> dict:
     """Sample `n_pairs` segment pairs and label them by ground-truth return.
 
     Pairs are drawn only from within this variation's data. Label 1 means the
     first segment is preferred.
+
+    candidate_starts restricts the pool to a given set of segment starts, which
+    is how held-out-episode evaluation pairs and Milestone 8's query budgets are
+    drawn. None means every valid segment in the variation.
     """
     rng = np.random.RandomState(seed)
-    starts = valid_segment_starts(data["episode_id"], segment_size)
+    starts = (valid_segment_starts(data["episode_id"], segment_size)
+              if candidate_starts is None else np.asarray(candidate_starts, dtype=np.int64))
     if len(starts) == 0:
         raise ValueError("no valid segments: episodes shorter than the segment size")
     a = starts[rng.randint(len(starts), size=n_pairs)]

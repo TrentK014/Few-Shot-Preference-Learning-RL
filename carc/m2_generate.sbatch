@@ -16,6 +16,7 @@ cd "$SLURM_SUBMIT_DIR"
 source carc/env.sh
 fspref_activate
 export OPENBLAS_NUM_THREADS=4
+export PYTHONUNBUFFERED=1
 
 TASK="${TASK:-window-open}"
 VARIATIONS="${VARIATIONS:-25}"

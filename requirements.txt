@@ -1,0 +1,7 @@
+metaworld
+mujoco
+gymnasium
+numpy<2
+torch
+imageio
+packaging

@@ -30,12 +30,21 @@ from .envs import (MAX_PATH_LENGTH, PRIOR_TASKS, get_scripted_policy, make_env,
 # Reference mixture (README invocation): 15 expert / 25 within / 10 cross / 2 random.
 DEFAULT_MIXTURE = {"expert": 15, "within": 25, "cross": 10, "random": 2}
 DEFAULT_EPSILON = 0.1  # gaussian action noise, reference default
+# Steps to keep recording after success. The reference stops immediately, which
+# works only if the task's reward is shaped. MetaWorld v3 drawer-close is
+# effectively binary: 0.45 at reset, then exactly 0.0 for the whole approach,
+# then 10.0 once the drawer shuts. Stopping at the success step therefore throws
+# away every bit of signal it has, and 74% of its preference pairs came out
+# separated by less than 1e-6. One extra segment length lets at least one whole
+# segment observe the post-success state. Set 0 to reproduce the reference.
+DEFAULT_SUCCESS_TAIL = 25
 SOURCES = ["expert", "within", "cross", "random"]
 SOURCE_ID = {s: i for i, s in enumerate(SOURCES)}
 
 
 def collect_episode(src_env, dest_env, policy, rng, epsilon=DEFAULT_EPSILON,
-                    max_steps=MAX_PATH_LENGTH, stop_on_success=True):
+                    max_steps=MAX_PATH_LENGTH, stop_on_success=True,
+                    success_tail=DEFAULT_SUCCESS_TAIL):
     """Step src_env and dest_env with one shared action stream; record dest_env.
 
     The policy is driven by src_env's observation. Noise is added before either
@@ -44,6 +53,7 @@ def collect_episode(src_env, dest_env, policy, rng, epsilon=DEFAULT_EPSILON,
     obs = reset_env(dest_env)
     src_obs = reset_env(src_env)
     O, A, R, S = [], [], [], []
+    remaining = None
     for _ in range(max_steps):
         act = np.asarray(policy.get_action(src_obs), dtype=np.float32)
         if epsilon > 0:
@@ -56,22 +66,34 @@ def collect_episode(src_env, dest_env, policy, rng, epsilon=DEFAULT_EPSILON,
         src_obs, _, _, _, src_info = step_env(src_env, act)
         R.append(rew); S.append(float(info.get("success", 0.0)))
         if stop_on_success and (info.get("success", 0.0) or src_info.get("success", 0.0)):
-            break
+            if remaining is None:
+                remaining = success_tail
+        if remaining is not None:
+            if remaining <= 0:
+                break
+            remaining -= 1
     return _pack(O, A, R, S)
 
 
-def collect_random_episode(dest_env, rng, max_steps=MAX_PATH_LENGTH, stop_on_success=True):
+def collect_random_episode(dest_env, rng, max_steps=MAX_PATH_LENGTH, stop_on_success=True,
+                           success_tail=DEFAULT_SUCCESS_TAIL):
     """Uniform random actions in dest_env. No source env."""
     obs = reset_env(dest_env)
     low, high = dest_env.action_space.low, dest_env.action_space.high
     O, A, R, S = [], [], [], []
+    remaining = None
     for _ in range(max_steps):
         act = rng.uniform(low, high).astype(np.float32)
         O.append(obs); A.append(act)
         obs, rew, _, _, info = step_env(dest_env, act)
         R.append(rew); S.append(float(info.get("success", 0.0)))
         if stop_on_success and info.get("success", 0.0):
-            break
+            if remaining is None:
+                remaining = success_tail
+        if remaining is not None:
+            if remaining <= 0:
+                break
+            remaining -= 1
     return _pack(O, A, R, S)
 
 
@@ -110,7 +132,7 @@ class _SourceEnvPool:
 def collect_variation(family: str, variation: int, seed: int, mt1_seed: int = 0,
                       mixture=None, epsilon=DEFAULT_EPSILON, max_steps=MAX_PATH_LENGTH,
                       stop_on_success=True, cross_families=None, pool=None,
-                      n_variations: int = 50):
+                      n_variations: int = 50, success_tail=DEFAULT_SUCCESS_TAIL):
     """Generate the full episode mixture for one (family, variation).
 
     Returns flat arrays plus an episode index, so segments can be sampled without
@@ -131,22 +153,26 @@ def collect_variation(family: str, variation: int, seed: int, mt1_seed: int = 0,
     episodes, sources = [], []
     for _ in range(mixture.get("expert", 0)):
         src, pol = pool.same_family(variation)
-        episodes.append(collect_episode(src, dest, pol, rng, epsilon, max_steps, stop_on_success))
+        episodes.append(collect_episode(src, dest, pol, rng, epsilon, max_steps,
+                                        stop_on_success, success_tail))
         sources.append("expert")
     for _ in range(mixture.get("within", 0)):
         other = int(rng.randint(n_variations))
         while other == variation and n_variations > 1:
             other = int(rng.randint(n_variations))
         src, pol = pool.same_family(other)
-        episodes.append(collect_episode(src, dest, pol, rng, epsilon, max_steps, stop_on_success))
+        episodes.append(collect_episode(src, dest, pol, rng, epsilon, max_steps,
+                                        stop_on_success, success_tail))
         sources.append("within")
     for _ in range(mixture.get("cross", 0)):
         fam = cross_families[int(rng.randint(len(cross_families)))]
         src, pol = pool.other_family(fam, int(rng.randint(n_variations)))
-        episodes.append(collect_episode(src, dest, pol, rng, epsilon, max_steps, stop_on_success))
+        episodes.append(collect_episode(src, dest, pol, rng, epsilon, max_steps,
+                                        stop_on_success, success_tail))
         sources.append("cross")
     for _ in range(mixture.get("random", 0)):
-        episodes.append(collect_random_episode(dest, rng, max_steps, stop_on_success))
+        episodes.append(collect_random_episode(dest, rng, max_steps, stop_on_success,
+                                               success_tail))
         sources.append("random")
 
     return _flatten(episodes, sources), pool

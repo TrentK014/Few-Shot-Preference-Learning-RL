@@ -16,7 +16,8 @@ import time
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from fspref.collect import DEFAULT_EPSILON, DEFAULT_MIXTURE, SOURCES, collect_variation  # noqa: E402
+from fspref.collect import (DEFAULT_EPSILON, DEFAULT_MIXTURE, DEFAULT_SUCCESS_TAIL,  # noqa: E402
+                             SOURCES, collect_variation)
 from fspref.envs import HELD_OUT_TASK, n_variations  # noqa: E402
 from fspref.prefs import (N_PAIRS, SEGMENT_SIZE, build_pairs, save_dataset,  # noqa: E402
                           valid_segment_starts, variation_path)
@@ -37,6 +38,9 @@ def main():
     p.add_argument("--discount", type=float, default=1.0,
                    help="1.0 = paper's plain sum; 0.99 matches the reference code")
     p.add_argument("--tie-margin", type=float, default=0.0)
+    p.add_argument("--success-tail", type=int, default=DEFAULT_SUCCESS_TAIL,
+                   help="steps recorded after success; 0 reproduces the reference. "
+                        "Needed because drawer-close reward is binary")
     p.add_argument("--no-stop-on-success", action="store_true",
                    help="run every episode to truncation instead of ending on success")
     p.add_argument("--max-steps", type=int, default=500)
@@ -50,7 +54,7 @@ def main():
     stop_on_success = not args.no_stop_on_success
     print(f"task={args.task} variations={args.start_variation}..{args.start_variation + args.variations - 1} "
           f"of {n_var_total} | mixture={DEFAULT_MIXTURE} eps={args.epsilon} "
-          f"stop_on_success={stop_on_success}")
+          f"stop_on_success={stop_on_success} success_tail={args.success_tail}")
     print(f"pairs/variation={args.pairs} segment={args.segment_size} discount={args.discount} "
           f"tie_margin={args.tie_margin}")
 
@@ -60,14 +64,16 @@ def main():
         data, pool = collect_variation(
             args.task, v, seed=args.seed + v, mt1_seed=args.mt1_seed,
             epsilon=args.epsilon, max_steps=args.max_steps,
-            stop_on_success=stop_on_success, pool=pool, n_variations=n_var_total)
+            stop_on_success=stop_on_success, pool=pool, n_variations=n_var_total,
+            success_tail=args.success_tail)
         pairs = build_pairs(data, n_pairs=args.pairs, segment_size=args.segment_size,
                             discount=args.discount, tie_margin=args.tie_margin,
                             seed=args.seed + v)
         meta = dict(task=args.task, variation=v, seed=args.seed + v, mt1_seed=args.mt1_seed,
                     segment_size=args.segment_size, discount=args.discount,
                     tie_margin=args.tie_margin, epsilon=args.epsilon,
-                    stop_on_success=stop_on_success, sources=",".join(SOURCES))
+                    stop_on_success=stop_on_success, success_tail=args.success_tail,
+                    sources=",".join(SOURCES))
         path = variation_path(args.out_root, args.task, v)
         save_dataset(path, data, pairs, meta)
 

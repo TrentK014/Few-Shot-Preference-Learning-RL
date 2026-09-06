@@ -50,7 +50,8 @@ def segment_returns(reward: np.ndarray, starts: np.ndarray, segment_size: int = 
 
 def build_pairs(data: dict, n_pairs: int = N_PAIRS, segment_size: int = SEGMENT_SIZE,
                 discount: float = 1.0, tie_margin: float = 0.0, seed: int = 0,
-                candidate_starts: np.ndarray | None = None) -> dict:
+                candidate_starts: np.ndarray | None = None, oversample: int = 8,
+                max_resample_rounds: int = 50) -> dict:
     """Sample `n_pairs` segment pairs and label them by ground-truth return.
 
     Pairs are drawn only from within this variation's data. Label 1 means the
@@ -59,19 +60,46 @@ def build_pairs(data: dict, n_pairs: int = N_PAIRS, segment_size: int = SEGMENT_
     candidate_starts restricts the pool to a given set of segment starts, which
     is how held-out-episode evaluation pairs and Milestone 8's query budgets are
     drawn. None means every valid segment in the variation.
+
+    tie_margin drops pairs whose ground-truth returns differ by less than the
+    margin, and oversamples so the dataset still reaches n_pairs. A pair the
+    oracle cannot separate carries no information and its label is arbitrary.
     """
     rng = np.random.RandomState(seed)
     starts = (valid_segment_starts(data["episode_id"], segment_size)
               if candidate_starts is None else np.asarray(candidate_starts, dtype=np.int64))
     if len(starts) == 0:
         raise ValueError("no valid segments: episodes shorter than the segment size")
-    a = starts[rng.randint(len(starts), size=n_pairs)]
-    b = starts[rng.randint(len(starts), size=n_pairs)]
-    ret_a = segment_returns(data["reward"], a, segment_size, discount)
-    ret_b = segment_returns(data["reward"], b, segment_size, discount)
-    if tie_margin > 0:
-        keep = np.abs(ret_a - ret_b) >= tie_margin
-        a, b, ret_a, ret_b = a[keep], b[keep], ret_a[keep], ret_b[keep]
+
+    if tie_margin <= 0:
+        a = starts[rng.randint(len(starts), size=n_pairs)]
+        b = starts[rng.randint(len(starts), size=n_pairs)]
+        ret_a = segment_returns(data["reward"], a, segment_size, discount)
+        ret_b = segment_returns(data["reward"], b, segment_size, discount)
+    else:
+        # Oversample and filter, so a margin does not silently shrink the dataset.
+        # Drawer Close needs this badly: its reward is effectively binary (zero
+        # until the drawer shuts, then 10), so 74% of uniformly sampled pairs
+        # differ by less than 1e-6 and their labels are coin flips. Window Open's
+        # dense reward leaves under 4% such pairs.
+        keep_a, keep_b, keep_ra, keep_rb = [], [], [], []
+        kept = 0
+        for _ in range(max_resample_rounds):
+            draw = max(n_pairs - kept, 1) * oversample
+            a = starts[rng.randint(len(starts), size=draw)]
+            b = starts[rng.randint(len(starts), size=draw)]
+            ra = segment_returns(data["reward"], a, segment_size, discount)
+            rb = segment_returns(data["reward"], b, segment_size, discount)
+            m = np.abs(ra - rb) >= tie_margin
+            keep_a.append(a[m]); keep_b.append(b[m])
+            keep_ra.append(ra[m]); keep_rb.append(rb[m])
+            kept += int(m.sum())
+            if kept >= n_pairs:
+                break
+        a = np.concatenate(keep_a)[:n_pairs]
+        b = np.concatenate(keep_b)[:n_pairs]
+        ret_a = np.concatenate(keep_ra)[:n_pairs]
+        ret_b = np.concatenate(keep_rb)[:n_pairs]
     return dict(pair_a_start=a.astype(np.int64), pair_b_start=b.astype(np.int64),
                 label=(ret_a > ret_b).astype(np.float32),
                 ret_a=ret_a.astype(np.float32), ret_b=ret_b.astype(np.float32))

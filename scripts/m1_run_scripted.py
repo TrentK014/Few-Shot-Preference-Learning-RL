@@ -27,7 +27,9 @@ def main():
     p.add_argument("--vary-goal", action="store_true", help="use goal variation i for episode i")
     args = p.parse_args()
 
-    env, name = make_env(args.task, seed=args.seed, render=args.render)
+    # Goal visible: some scripted policies (e.g. push) read obs[36:39].
+    env, name = make_env(args.task, variation=0, partially_observable=False,
+                         render=args.render)
     policy = None if args.random else get_scripted_policy(name)
     print(f"task={name} obs_space={env.observation_space.shape} act_space={env.action_space.shape}")
     print(f"policy={'random' if policy is None else type(policy).__name__} noise_std={args.noise_std}")

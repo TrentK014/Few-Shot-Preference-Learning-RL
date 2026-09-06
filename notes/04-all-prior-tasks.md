@@ -1,9 +1,9 @@
 # Milestone 4: preference datasets for all three prior tasks
 
 ## Status
-Data complete and verified on CARC (job 11772780, 9m12s). 25 goal variations each for Window Open, Push
-and Drawer Close, so **75 meta-training tasks** and 450,000 labeled pairs in 21.7 MB.
-Learnability check running as job 11772814.
+Complete. Data verified on CARC (job 11772780, 9m12s): 25 goal variations each for Window Open, Push and
+Drawer Close, so **75 meta-training tasks** and 450,000 labeled pairs in 21.7 MB. Learnability verified
+on job 11773123.
 
 ## What this milestone actually uncovered
 
@@ -74,8 +74,44 @@ The monotone ladder is the honest statement, and it holds everywhere.
 Drawer Close remains the weakest signal at 0.80, which is intrinsic: with no shaping, the only thing to
 prefer is whether the drawer got shut.
 
+## Learnability: is each task's data actually learnable? (job 11773123)
+
+Running the Milestone 3 reward model on each task, 4 variations each, against heuristic bars recomputed
+on the same pairs:
+
+| task | per-variation model | heuristic | hard subset | heuristic |
+|---|---|---|---|---|
+| window-open | **0.9719** | 0.9011 | 0.9255 | 0.6765 |
+| drawer-close | **0.8652** | 0.8127 | 0.8225 | 0.6865 |
+| push | 0.8986 | 0.9042 | 0.7445 | 0.7295 |
+
+Window Open and Drawer Close clear their bars. Drawer Close being learnable at all is the payoff from the
+success-tail fix; before it, its labels were 74% coin flips.
+
+**Push fails per-variation, and it is a sample-size problem, not a difficulty ceiling.**
+
+My first hypothesis was that Push is structurally harder because it is the one task whose goal is sampled
+*independently* of the object rather than being a fixed offset from it (`rand_vec` is 6-dimensional for
+push, 3 for window and drawer), and the goal is masked from the observation. So a Push reward model cannot
+read the target and must infer it.
+
+Two measurements refute that as the main cause:
+
+- **Longer training changes nothing.** Raising the budget from 150 to 400 epochs moved Push from 0.8986 to
+  0.8989. It is not underfitting. Two of the four variations had their best validation accuracy at epoch 1
+  or 2, meaning validation degraded from the very start while training accuracy kept climbing.
+- **Pooling fixes it.** One model over 7 Push variations reaches **0.9403** against a 0.8946 bar, and
+  0.8643 on the hard subset against 0.7026. On 3 variations held out of training entirely it still scores
+  0.9387 against 0.8790.
+
+Per-variation training gives the model ~2,500 pairs; pooling gives ~17,400. Push simply needs more
+preference data than Window Open to reach the same quality, and it generalizes across goals once it has
+it. The goal-observability asymmetry is real and worth remembering, but it is not what was limiting
+accuracy here.
+
 ## Carried into Milestone 5
-The three tasks are genuinely heterogeneous. Push's expert segments score 127 while Window Open's score
-39, and Drawer Close's reward is binary where the others are shaped. A single pooled reward function
-cannot serve all three, which is the situation MAML exists to handle. That heterogeneity is the point of
-the experiment, not a defect to normalize away.
+The three tasks are genuinely heterogeneous: Push's expert segments score 127 against Window Open's 39,
+and Drawer Close's reward is binary where the others are shaped. Push also needs several times more
+preference data per goal than Window Open. That heterogeneity is the point of the experiment rather than a
+defect to normalize away, and the Push result is a concrete reason to expect meta-learning to help: the
+information a single goal's small preference set lacks is exactly what a shared initialization can supply.

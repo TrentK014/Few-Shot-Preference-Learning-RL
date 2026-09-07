@@ -128,6 +128,33 @@ class VariationData:
                         discount=disc, seed=seed, candidate_starts=pool)
         return p["pair_a_start"], p["pair_b_start"], p["label"]
 
+    def sample_pairs(self, n: int, rng, split: str = "train", replace: bool = False):
+        """n random pairs from one split, as (a_starts, b_starts, labels).
+
+        This is how a MAML task hands over its support and query sets.
+        """
+        a, b, y = self.stored_pairs(split)
+        if len(y) == 0:
+            raise ValueError(f"{self.key}: no pairs in split '{split}'")
+        idx = rng.choice(len(y), size=min(n, len(y)) if not replace else n,
+                         replace=replace or n > len(y))
+        return a[idx], b[idx], y[idx]
+
+    def sample_batch(self, n: int, rng, split: str = "train"):
+        return self.batch(*self.sample_pairs(n, rng, split))
+
+    def support_query(self, n_support: int, n_query: int, rng, split: str = "train"):
+        """Disjoint support and query batches, which MAML requires.
+
+        Overlap would let the inner loop memorize the very pairs the outer loss
+        scores, and the meta-objective would stop measuring adaptation.
+        """
+        a, b, y = self.stored_pairs(split)
+        need = n_support + n_query
+        idx = rng.choice(len(y), size=min(need, len(y)), replace=need > len(y))
+        s, q = idx[:n_support], idx[n_support:need]
+        return (self.batch(a[s], b[s], y[s]), self.batch(a[q], b[q], y[q]))
+
     def gather(self, starts: np.ndarray):
         """(N, T, 39) observations and (N, T, 4) actions for these segment starts."""
         idx = torch.as_tensor(starts[:, None] + np.arange(self.segment_size)[None, :],

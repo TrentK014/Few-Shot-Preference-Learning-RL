@@ -108,8 +108,35 @@ def usable_device(requested: str) -> str:
         return "cpu"
 
 
-def run_arm(arm: str, args, maml, seed: int):
-    """Train one arm for one seed. Returns a dict of curves and final metrics."""
+def _write_partial(path, args, arm, seed, curve, feedback, readapt_log, collected,
+                   final_window):
+    """Rewrite the shard's result file with the run so far.
+
+    Same schema as the final write, so scripts/m7_combine.py merges a partial
+    shard without knowing the difference. A partial run just has a shorter curve.
+    """
+    run = dict(arm=arm, seed=seed, curve=curve, feedback=feedback,
+               readapt=readapt_log, total_feedback=collected,
+               final_success=float(np.mean([c[1] for c in curve[-final_window:]]))
+               if curve else 0.0,
+               best_success=max((c[1] for c in curve), default=0.0),
+               partial=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump({"args": vars(args), "results": {arm: [run]}}, f)
+    os.replace(tmp, path)   # atomic, so a reader never sees a half-written file
+
+
+def run_arm(arm: str, args, maml, seed: int, partial_path: str | None = None):
+    """Train one arm for one seed. Returns a dict of curves and final metrics.
+
+    If `partial_path` is given, the run's curve is rewritten there after every
+    evaluation. A 500k-step shard takes hours -- the Init arm longest, because it
+    runs plain Adam to convergence every feedback session where MAML converges
+    inside its 40 learned-rate steps -- and without this a shard that hits the
+    SLURM wall clock loses every evaluation it ever made. Writing as we go means a
+    timeout costs the tail of one curve instead of the whole run.
+    """
     device = args.device
     rng = np.random.RandomState(seed)
     torch.manual_seed(seed)
@@ -197,6 +224,9 @@ def run_arm(arm: str, args, maml, seed: int):
             print(f"    [{arm} seed{seed}] step {step:7d}  success {sr:.2f}  "
                   f"feedback {schedule.collected:4d}  ({time.time() - t0:.0f}s)",
                   flush=True)
+            if partial_path:
+                _write_partial(partial_path, args, arm, seed, curve, feedback_curve,
+                               readapt_log, schedule.collected, args.final_window)
 
     env.close(); eval_env.close()
     final = float(np.mean([c[1] for c in curve[-args.final_window:]])) if curve else 0.0
@@ -295,8 +325,11 @@ def main():
     for arm in args.arms:
         print(f"########## {arm} ##########")
         seeds = range(args.seed_offset, args.seed_offset + args.seeds)
-        results[arm] = [run_arm(arm, args, maml, seed) for seed in seeds]
         tag = f"_{'-'.join(args.arms)}_s{args.seed_offset}" if args.shard_tag else ""
+        partial = (os.path.join(args.out, f"m7_results{tag}.json")
+                   if args.shard_tag and args.seeds == 1 else None)
+        results[arm] = [run_arm(arm, args, maml, seed, partial_path=partial)
+                        for seed in seeds]
         with open(os.path.join(args.out, f"m7_results{tag}.json"), "w") as f:
             json.dump({"args": vars(args), "results": results}, f, indent=2)
 

@@ -25,9 +25,23 @@ OBS_DIM = 39
 ACT_DIM = 4
 GOAL_SLICE = slice(36, 39)  # obs[36:39] is the goal, zeroed when partially observable
 
-# Meta-training families. Window Close is the held-out task and must never be
-# used as a behavior source, or it leaks into pretraining.
-PRIOR_TASKS = ["window-open", "push", "drawer-close"]
+# Meta-training families: the ML10 training set, which is exactly the ten tasks
+# in the Figure 2 header of the paper. Milestones 4-6 used only the first three,
+# and the Milestone 6 result traced back to that: with three families the
+# meta-learner memorizes three solutions instead of learning a transferable
+# prior. See notes/06b-paper-crosscheck.md.
+#
+# Window Close is the held-out task and must never be used as a behavior source,
+# or it leaks into pretraining. Note that Window Open IS a prior task, exactly as
+# in the paper; the held-out task being the reverse of a prior one is the
+# paper's setup too, not an accident of ours.
+PRIOR_TASKS = [
+    "reach", "push", "pick-place", "door-open", "drawer-close",
+    "button-press-topdown", "peg-insert-side", "window-open", "sweep", "basketball",
+]
+# The three families Milestones 4-6 actually used, kept so the 3-vs-10 comparison
+# can be rerun without editing code.
+PRIOR_TASKS_V1 = ["window-open", "push", "drawer-close"]
 HELD_OUT_TASK = "window-close"
 TASKS = PRIOR_TASKS + [HELD_OUT_TASK]
 

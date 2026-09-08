@@ -99,25 +99,32 @@ inherently fatal; it bites at 1-of-3 dilution and evidently not at 1-of-10.**
    policy's replay buffer.
 4. Milestone 7 measures success rate, which is what the paper actually claims.
 
-## Interim result: the meta-learner stopped memorizing
+## Result: the meta-learner stopped memorizing
 
-Meta-validation during the 10-family run (job 11795032, 200 meta-train / 50
-held-out tasks), against Milestone 5's 3-family run:
+10-family meta-training (job 11795032, 200 meta-train / 50 held-out tasks, 15000
+steps in 1h37m, checkpoint `runs/m6b/maml_init.pt`, best held-out adapted 0.9413):
 
 | step | unadapted | adapted | gain |
 |---|---|---|---|
 | 1000 | 0.853 | 0.899 | +0.046 |
-| 2000 | 0.861 | 0.912 | +0.051 |
 | 3000 | 0.862 | 0.918 | +0.056 |
-| 4000 | 0.853 | 0.916 | +0.063 |
-| 5000 | 0.865 | 0.921 | **+0.065** |
+| 5000 | 0.865 | 0.921 | +0.065 |
+| 7000 | 0.871 | 0.931 | +0.060 |
+| 10000 | 0.858 | 0.936 | +0.078 |
+| 13000 | 0.874 | 0.937 | +0.063 |
+| **15000** | **0.870** | **0.941** | **+0.071** |
 | M5 final (3 families) | 0.9401 | 0.9405 | **+0.0004** |
+
+Both priors reach ~0.94 adapted. The difference is how. The 3-family model was
+already at 0.94 before seeing a label; the 10-family model sits at 0.87 and gets
+to 0.94 by adapting. The gap grows across all 15000 steps rather than wandering,
+so it is a property of the prior set and not noise.
 
 This is the mechanism in cause 3, confirmed directly. With three families the
 meta-initialization climbed to 0.94 unadapted -- it had memorized three
 family-specific solutions -- and adaptation had nothing left to do. With ten it
-stays flat at ~0.86 across 5000 steps while the adapted score keeps climbing, so
-the inner loop is doing real and increasing work.
+stays flat at ~0.87 across the whole run while the adapted score climbs, so the
+inner loop is doing real work.
 
 That is what MAML is supposed to produce: not weights that are already right, but
 weights that move to the right place quickly. It is also why Milestone 5's

@@ -118,3 +118,73 @@ mediocre behavior. PEBBLE has to discover that signal from its first few queries
 before it can shape anything; few-shot starts with it. The advantage therefore
 shows up as *time-to-solve*, which is what the table measures, and not as
 better ranking of held-out pairs, which is what Milestone 6 measured.
+
+---
+
+# FINAL: all 18 shards complete
+
+## 10-family prior (`runs/m7`)
+
+| arm | final success | steps to solve | **queries to solve** |
+|---|---|---|---|
+| sac_oracle (ceiling) | 1.000 +/- 0.000 | 50k +/- 16k | 0 |
+| **few_shot** | **1.000 +/- 0.000** | 63k +/- 40k | **101.0 +/- 64.0** |
+| init | 1.000 +/- 0.000 | 77k +/- 33k | 122.3 +/- 52.6 |
+| pebble | 0.667 +/- 0.471 | 83k +/- 33k | 130.7 +/- 49.0 |
+
+- **H10 CONFIRMED** few-shot beats PEBBLE on final success, 1.000 vs 0.667.
+- **H10b CONFIRMED** few-shot needs fewer queries, 101.0 vs 130.7. The paper's
+  central claim in the form it actually argues it.
+- **H11 REFUTED** few-shot and Init tie at 1.000 final success. On query
+  efficiency few-shot wins, 101.0 vs 122.3.
+- **H12 CONFIRMED** few-shot reaches 100% of the ground-truth ceiling.
+
+## 3-family prior (`runs/m7_3family`)
+
+| arm | final success | queries to solve |
+|---|---|---|
+| few_shot | 1.000 +/- 0.000 | 103.7 +/- 68.4 |
+| init | **0.778 +/- 0.314** | 85.0 +/- 7.8 |
+
+## The two results that matter most, and they are not the ones expected
+
+**1. Prior breadth barely moved policy performance.** few_shot needs 103.7
+queries under the 3-family prior and 101.0 under the 10-family one -- a
+difference well inside the noise, and both arms solve the task on 3/3 seeds.
+Milestone 6b showed the same expansion improved *preference accuracy* a great
+deal (MAML minus scratch, +0.062 to +0.172 at 4 labels).
+
+So the two metrics respond to completely different things. Expanding the prior
+made the reward model a much better *ranker* and left it an equally good *dense
+reward*. Since the policy only consumes the dense reward, the policy did not
+care. This is the shortcut story from Milestone 6b, confirmed from the other
+direction: three families already supplied "approach the object", which is what
+actually shapes the policy, and the extra seven families refined a ranking
+ability that SAC never uses.
+
+**2. Re-adaptation buys reliability, not speed.** Init is not slower to first
+success -- under the 3-family prior it is *faster* (85.0 vs 103.7 queries). What
+it fails to do is hold on: its final success is 0.778 +/- 0.314 against
+few_shot's 1.000 +/- 0.000, so at least one seed reached 1.00 and then lost it.
+The same pattern is visible in PEBBLE (best 1.000, final 0.667).
+
+That is what the reset-and-re-adapt step is for. As the policy improves, the
+replay buffer's distribution shifts and the reward function implied by the
+accumulated preferences moves with it. Continuing to fine-tune stale weights
+tracks that drift badly; rebuilding from the meta-initialization each session
+does not. The paper calls this its crucial algorithmic difference from Init, and
+the failure mode it prevents turns out to be **instability late in training**,
+not slowness early.
+
+Both findings only became visible because the harness reports first-time-to-solve
+separately from final success. Reporting only "final success" would have shown
+three arms tied at 1.000 and one at 0.667, and reporting only "best success"
+would have shown all four tied at 1.000.
+
+## What we do and do not claim
+
+We reproduce the ordering (few-shot < Init < PEBBLE in queries needed) and the
+reliability gap, at a fixed 200-query budget, on one held-out task, with 3 seeds.
+
+We do **not** reproduce the paper's 20x figure and do not claim it: that compares
+against PEBBLE's original 4000-query budget for Window Close, which we never ran.

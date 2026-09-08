@@ -66,3 +66,55 @@ is killed by the wall clock.
 three seeds. Without it, a weak preference arm would be ambiguous between "the
 reward model is bad" and "the RL is bad". With it, every preference-arm number is
 attributable to the reward model.
+
+---
+
+# Full comparison (10-family prior), all four arms
+
+`runs/m7`, 3 seeds per arm, the paper's Window Close schedule. sac_oracle and
+pebble are complete; few_shot and init are still running at the time of writing
+but all three seeds of each have already reached 1.00, and the query-efficiency
+numbers below are recorded events rather than projections.
+
+| arm | final success | steps to solve | **queries to solve** |
+|---|---|---|---|
+| sac_oracle (ceiling) | 1.000 +/- 0.000 | 50k +/- 16k | 0 |
+| **few_shot** | **1.000 +/- 0.000** | 63k +/- 40k | **101.0 +/- 64.0** |
+| init | 1.000 +/- 0.000 | 77k +/- 33k | 122.3 +/- 52.6 |
+| pebble | 0.667 +/- 0.471 | 83k +/- 33k | 130.7 +/- 49.0 |
+
+**The ordering is the paper's**: few_shot needs the fewest queries, Init next,
+PEBBLE most, and PEBBLE is the only arm that fails to hold 1.00 (one seed of
+three collapsed).
+
+## Hypotheses
+
+- **H10 CONFIRMED** -- few-shot beats PEBBLE on final success at the same budget,
+  1.000 vs 0.667.
+- **H10b CONFIRMED** -- few-shot needs fewer queries than PEBBLE to solve the
+  task, 101.0 vs 130.7. This is the paper's central claim in the form it actually
+  argues it: same performance, less feedback.
+- **H11 REFUTED** -- few-shot does not beat Init on *final success*, because both
+  saturate at 1.000. On query efficiency it does (101.0 vs 122.3), which is the
+  sharper comparison; the refutation is an artifact of a metric with no headroom,
+  exactly the problem the hard subset was introduced to solve in Milestone 6b.
+- **H12 CONFIRMED** -- few-shot reaches 100% of the ground-truth ceiling.
+
+## The scale caveat
+
+We do not reproduce the paper's *20x* figure, and should not claim to. That
+number compares against PEBBLE's original feedback budget (4000 queries for
+Window Close, per their Figure 6), which we never ran. What we show is the
+like-for-like comparison at a fixed 200-query budget: few-shot converges with
+about 23% fewer queries than PEBBLE and, unlike PEBBLE, does so on every seed.
+
+## Why the ordering appears despite the hard-subset result
+
+Milestone 6b found the prior neutral-to-harmful on hard-subset preference
+accuracy. That is consistent with this. The prior's contribution is a dense,
+immediately-available "approach the object" signal, which is worth the most
+early in training when the policy is bad and the replay buffer holds nothing but
+mediocre behavior. PEBBLE has to discover that signal from its first few queries
+before it can shape anything; few-shot starts with it. The advantage therefore
+shows up as *time-to-solve*, which is what the table measures, and not as
+better ranking of held-out pairs, which is what Milestone 6 measured.

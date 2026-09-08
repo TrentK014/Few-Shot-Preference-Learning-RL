@@ -16,7 +16,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 
-from .collect import SOURCES
+from .collect import SOURCE_ID, SOURCES
 from .prefs import (SEGMENT_SIZE, build_pairs, load_dataset, task_key,
                     valid_segment_starts)
 
@@ -128,20 +128,37 @@ class VariationData:
                         discount=disc, seed=seed, candidate_starts=pool)
         return p["pair_a_start"], p["pair_b_start"], p["label"]
 
-    def sample_pairs(self, n: int, rng, split: str = "train", replace: bool = False):
+    def sample_pairs(self, n: int, rng, split: str = "train", replace: bool = False,
+                     sources: "list[str] | None" = None):
         """n random pairs from one split, as (a_starts, b_starts, labels).
 
         This is how a MAML task hands over its support and query sets.
+
+        `sources` restricts both segments of a pair to the named behavior sources
+        (see `collect.SOURCES`). The paper's online queries come from the replay
+        buffer of a policy that is still bad, so both segments are mediocre;
+        our offline mixture contains scripted experts, which makes many pairs
+        trivially separable by "one arm reached the object and the other did
+        not". Passing sources=["within", "cross", "random"] approximates the
+        online regime offline, and it is the regime where a prior should matter.
         """
         a, b, y = self.stored_pairs(split)
         if len(y) == 0:
             raise ValueError(f"{self.key}: no pairs in split '{split}'")
+        if sources:
+            keep_ids = {SOURCE_ID[s] for s in sources}
+            src = self.source[self.episode_id]
+            ok = np.isin(src[a], list(keep_ids)) & np.isin(src[b], list(keep_ids))
+            if ok.sum() == 0:
+                raise ValueError(f"{self.key}: no pairs with both segments in {sources}")
+            a, b, y = a[ok], b[ok], y[ok]
         idx = rng.choice(len(y), size=min(n, len(y)) if not replace else n,
                          replace=replace or n > len(y))
         return a[idx], b[idx], y[idx]
 
-    def sample_batch(self, n: int, rng, split: str = "train"):
-        return self.batch(*self.sample_pairs(n, rng, split))
+    def sample_batch(self, n: int, rng, split: str = "train",
+                     sources: "list[str] | None" = None):
+        return self.batch(*self.sample_pairs(n, rng, split, sources=sources))
 
     def support_query(self, n_support: int, n_query: int, rng, split: str = "train"):
         """Disjoint support and query batches, which MAML requires.

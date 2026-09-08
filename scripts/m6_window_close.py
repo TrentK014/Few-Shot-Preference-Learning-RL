@@ -52,6 +52,30 @@ def finding(name, confirmed, detail=""):
     return confirmed
 
 
+def paired_stats(a, b):
+    """Paired comparison of two arms over runs that shared the same support pairs.
+
+    Runs are appended in the same (variation, draw) order for every arm, so row j
+    of `a` and row j of `b` saw identical labels and differ only in where the
+    weights started. That pairing removes the between-variation variance that
+    swamps a naive two-sample comparison at these sample sizes.
+
+    Returns (mean difference, sd of the difference, t statistic, two-sided p,
+    number of wins, n). p comes from the normal approximation to the paired t,
+    which is adequate at n = variations x draws and avoids a scipy dependency.
+    """
+    a = np.asarray(a, dtype=float); b = np.asarray(b, dtype=float)
+    ok = np.isfinite(a) & np.isfinite(b)
+    d = a[ok] - b[ok]
+    n = len(d)
+    if n < 2:
+        return float("nan"), float("nan"), float("nan"), 1.0, 0, n
+    md, sd = float(d.mean()), float(d.std(ddof=1))
+    t = md / (sd / math.sqrt(n)) if sd > 0 else 0.0
+    pval = math.erfc(abs(t) / math.sqrt(2))
+    return md, sd, t, pval, int((d > 0).sum()), n
+
+
 def binom_p(correct: int, n: int) -> float:
     if n == 0:
         return 1.0
@@ -77,6 +101,13 @@ def main():
     p.add_argument("--eval-pairs", type=int, default=1000)
     p.add_argument("--lr", type=float, default=3e-4)
     p.add_argument("--hard-quantile", type=float, default=0.25)
+    p.add_argument("--support-sources", nargs="+", default=None,
+                   choices=["expert", "within", "cross", "random"],
+                   help="restrict support pairs to these behavior sources. The paper's "
+                        "online queries come from a still-bad policy's replay buffer, so "
+                        "both segments are mediocre; our offline mixture contains scripted "
+                        "experts. Pass 'within cross random' to approximate the online "
+                        "regime, which is where a prior should matter most.")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = p.parse_args()
@@ -134,7 +165,8 @@ def main():
         for k in args.budgets:
             for d in range(args.draws):
                 rng = np.random.RandomState(args.seed + 1000 * ti + 31 * d + k)
-                support = var.sample_batch(k, rng, split="train")
+                support = var.sample_batch(k, rng, split="train",
+                                           sources=args.support_sources)
                 for arm in ARMS:
                     if arm == "scratch":
                         net, _, sa = scratch_arm(support, ensemble_size=maml.net.ensemble_size,
@@ -177,10 +209,29 @@ def main():
                           **{f"{a}_support": float(np.mean(sup_acc[a][k])) for a in ARMS})
         print(f"  {k:7d} {s:8.4f}+/-{ss:.3f} {i:8.4f}+/-{isd:.3f} {z:8.4f}+/-{zs:.3f} "
               f"{z - s:+13.4f} {z - i:+10.4f}")
-    print(f"\n  hard subset (shortcut uninformative), heuristic {np.mean(cal_hard):.4f}:")
+    # ---------------------------------------------------------- the hard subset
+    # Promoted to a primary metric in Milestone 6b. On the full distribution the
+    # hand-distance shortcut scores ~0.88 and every arm lands within a few points
+    # of it, so there is almost no headroom for a prior to show. The hard subset
+    # is the quarter of pairs where that shortcut is least informative, and it is
+    # where the 3-family prior was found to be actively worse than scratch --
+    # below chance at the smallest budgets. That is the transfer question.
+    print(f"\n{'=' * 78}\nHARD SUBSET  (shortcut uninformative; the primary transfer metric)")
+    print(f"  heuristic on this subset: {np.mean(cal_hard):.4f}  "
+          f"(vs {np.mean(cal_overall):.4f} on the full distribution)\n")
+    print(f"  {'labels':>7s} {'scratch':>16s} {'Init':>16s} {'MAML':>16s} "
+          f"{'MAML-scratch':>26s}")
     for k in args.budgets:
-        print(f"  {k:7d} {summary[k]['scratch_hard']:8.4f} {summary[k]['init_hard']:16.4f} "
-              f"{summary[k]['maml_hard']:16.4f}")
+        sh, shs = m(scratch_hard[k]); ih, ihs = m(init_hard[k]); zh, zhs = m(maml_hard[k])
+        md, sd_, t, pv, wins, n = paired_stats(maml_hard[k], scratch_hard[k])
+        mdi, _, _, pvi, winsi, _ = paired_stats(maml_hard[k], init_hard[k])
+        summary[k].update(scratch_hard_sd=shs, init_hard_sd=ihs, maml_hard_sd=zhs,
+                          hard_maml_minus_scratch=md, hard_p=pv, hard_wins=wins, hard_n=n,
+                          hard_maml_minus_init=mdi, hard_p_init=pvi, hard_wins_init=winsi)
+        print(f"  {k:7d} {sh:8.4f}+/-{shs:.3f} {ih:8.4f}+/-{ihs:.3f} {zh:8.4f}+/-{zhs:.3f} "
+              f"{md:+9.4f}  p={pv:.3f}  {wins}/{n} wins")
+    print("\n  (paired over the same (variation, draw) support sets, so the comparison\n"
+          "   removes between-variation variance; p is a two-sided paired t.)")
     print("\n  support-set accuracy reached (all arms stop at 0.95; a gap between support\n"
           "  and held-out accuracy is overfitting to the few labels):")
     for k in args.budgets:
@@ -223,8 +274,25 @@ def main():
     finding("H0 MAML beats from-scratch at every budget (the project's main question)",
             all(g > 0 for g in gaps0),
             " ".join(f"{k}:{g:+.3f}" for k, g in zip(args.budgets, gaps0)))
-    finding("H1 unadapted meta-init is at or below chance on Window Close", mi <= 0.50,
-            f"{mi:.4f} +/- {mis:.4f}")
+    # H1 is scored on BOTH distributions. With the 3-family prior it was refuted on
+    # the full distribution (0.7136) and confirmed on the hard subset, where the
+    # pretrained arms fell below chance. The prediction was right; the metric hid
+    # it, because the hand-distance shortcut carried the full-distribution number.
+    finding("H1 unadapted meta-init is at or below chance on Window Close "
+            "(full distribution)", mi <= 0.50, f"{mi:.4f} +/- {mis:.4f}")
+    kmin = min(args.budgets)
+    hard_init0 = float(np.nanmean(init_hard[kmin]))
+    finding(f"H1b pretrained arms are at or below chance on the HARD subset at "
+            f"{kmin} labels", hard_init0 <= 0.50,
+            f"Init {hard_init0:.4f}, MAML {float(np.nanmean(maml_hard[kmin])):.4f}, "
+            f"scratch {float(np.nanmean(scratch_hard[kmin])):.4f}")
+
+    # The transfer question, on the metric where it actually lives.
+    hard_gaps = [summary[k]["hard_maml_minus_scratch"] for k in args.budgets]
+    finding("H7 MAML beats scratch ON THE HARD SUBSET (the claim the 3-family prior "
+            "failed most clearly)", all(g > 0 for g in hard_gaps),
+            " ".join(f"{k}:{g:+.3f}(p={summary[k]['hard_p']:.2f})"
+                     for k, g in zip(args.budgets, hard_gaps)))
     d_small = summary[min(args.budgets)]["maml"] - summary[min(args.budgets)]["init"]
     d_large = summary[kmax]["maml"] - summary[kmax]["init"]
     finding(f"H2 MAML beats Init at {min(args.budgets)} labels", d_small > 0, f"{d_small:+.4f}")

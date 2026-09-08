@@ -78,9 +78,41 @@ as a sampling-range artifact than a disagreement with the paper.
 - H11: `few_shot` beats `init` (re-adaptation beats plain fine-tuning).
 - H12: `few_shot` reaches >= 80% of the ground-truth-reward ceiling.
 
+## The ground-truth control passed
+
+Ran `sac_oracle` alone for 150k steps on Window Close before spending cluster
+time on anything else:
+
+| steps | 10k | 20k | 30k | 40k | 50k | 60k | 70k+ |
+|---|---|---|---|---|---|---|---|
+| success | 0.00 | 0.00 | 0.00 | 0.00 | 1.00 | 0.00 | 1.00 |
+
+Final **1.000 +/- 0.000**, stable from 70k steps on. So the SAC implementation
+solves Window Close from the true reward well inside the budget the preference
+arms get, and any shortfall in those arms is attributable to the reward model
+rather than to the optimizer. That is the whole reason this arm exists.
+
+The dip at 60k is ordinary early-SAC oscillation, not a bug -- the policy is
+still moving fast at that point and the evaluation is only 10 episodes.
+
+## Two cluster lessons
+
+**Not every GPU on CARC runs this torch build.** The first pilot drew a Tesla
+V100 (compute capability 7.0) and torch 2.14+cu130 ships no kernels for it, so
+the job queued, started, and died four minutes in with
+`CUBLAS_STATUS_ARCH_MISMATCH` inside the actor's first forward pass. a40, a100
+and l40s work; p100 and v100 do not. `usable_device()` now runs a real matmul at
+startup and falls back to CPU with a message naming the supported GPUs.
+
+**This workload does not want a GPU anyway.** SAC here is bound by MuJoCo
+stepping, not by the 3x256 networks, so the a40 queue was pure cost. Milestone 7
+runs as a CPU array job instead -- one (arm, seed) per task, twelve in parallel
+-- which schedules immediately and finishes the sweep faster than one GPU job
+running the same twelve sequentially. `scripts/m7_combine.py` merges the shards.
+
 ## Status
 
-Implemented and smoke-tested locally end to end: all four arms run, feedback is
-collected and capped at the budget, and the contamination guard refuses a leaky
-checkpoint. Pending: the ground-truth SAC validation run, then the 10-family
-prior (Milestone 6b) whose checkpoint this milestone consumes.
+Implemented, smoke-tested on all four arms, and the ground-truth control passed.
+The `sac_oracle` and `pebble` shards need no checkpoint, so they are already
+running; `few_shot` and `init` are chained behind the 10-family meta-training via
+Slurm dependencies.

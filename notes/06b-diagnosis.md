@@ -216,3 +216,60 @@ Both halves are worth reporting. The first vindicates the diagnosis; the second
 says prior breadth is not sufficient for the deeper claim, and points at the next
 test -- whether the same holds on ML10 test tasks that have no reversed sibling
 in the prior set (Stage 3).
+
+## Non-expert support regime: H8 refuted, and significantly
+
+Same job, second pass, with `--support-sources within cross random` so no support
+segment comes from a scripted expert. This is the closest offline approximation
+to the paper's online queries, which are drawn from the replay buffer of a policy
+that is still bad -- both segments mediocre, rather than expert against random.
+
+H8 predicted this would *widen* MAML's advantage, since it is the regime where a
+prior should matter most. It did not.
+
+Full distribution still confirms H0: 4:+0.168, 8:+0.096, 16:+0.074, 25:+0.046,
+50:+0.026, 100:+0.008, 200:+0.006. Monotone, positive everywhere, and H4 holds
+(MAML at 200 reaches 0.9187 against the 0.8800 heuristic).
+
+The hard subset goes the other way, and significantly:
+
+| labels | MAML - scratch | p |
+|---|---|---|
+| 4 | +0.016 | 0.62 |
+| 8 | -0.021 | 0.42 |
+| 16 | -0.049 | 0.076 |
+| 25 | -0.063 | 0.13 |
+| 50 | -0.043 | 0.054 |
+| 100 | **-0.048** | **0.004** |
+| 200 | **-0.034** | **0.000** |
+
+At 100 and 200 labels the pretrained arms are significantly worse than
+from-scratch on shortcut-uninformative pairs. That is not noise.
+
+**H8 is REFUTED.** The most likely reading: what the ten-family prior transfers
+is largely the "approach the object" shortcut, which is genuinely general across
+MetaWorld families. When support pairs are mediocre-vs-mediocre, a from-scratch
+model is forced to find something task-specific in them, while the pretrained
+arms remain anchored to the general prior -- which is exactly the feature that is
+uninformative on the hard subset. More labels make this worse, not better,
+because scratch keeps learning task-specific structure while the pretrained arms
+keep being pulled back toward the prior.
+
+MAML and Init are also indistinguishable here (+0.0000 at 4 labels, +0.0050 at
+200), so the learned per-parameter inner rates buy nothing in this regime.
+
+### Why this matters for the project's claim
+
+The two regimes together say something more precise than either alone:
+
+- The ten-family prior reliably helps on the metric Milestone 6 measured, in both
+  regimes, at every budget. H0 is confirmed twice over.
+- That help comes from better use of the hand-distance shortcut, not from
+  understanding Window Close. On pairs where the shortcut is uninformative the
+  prior is neutral at best (expert-inclusive) and significantly harmful at worst
+  (non-expert, higher budgets).
+
+Preference accuracy is not what the paper claims, so this does not contradict it.
+Milestone 7 measures success rate, which is the claim -- and a reward model can
+shape a good policy while being mediocre at ranking held-out pairs, precisely
+because the shortcut it relies on is a decent dense reward for "go to the object".

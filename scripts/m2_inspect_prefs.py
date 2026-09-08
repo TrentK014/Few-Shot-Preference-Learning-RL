@@ -197,8 +197,25 @@ def main():
             v = np.concatenate(agg["succ_by_source"][s])
             srate[s] = v.mean()
             print(f"    {s:8s} n={len(v):4d} success={v.mean():.2f}")
-    check("expert source solves the task", srate.get("expert", 0) >= 0.95,
-          f"{srate.get('expert', float('nan')):.2f}")
+    # The floor is 0.5, not 0.95. MetaWorld's scripted policies are genuinely
+    # imperfect on the harder families -- measured here: door-open 0.88-0.92,
+    # peg-insert-side 0.88-0.89, basketball 0.89, against ~1.00 for reach, push,
+    # window-open and drawer-close. The 0.95 this check used to carry was fitted
+    # to the three easy families Milestones 2-6 happened to use, and it flagged
+    # three of the ten new ones as broken when their data is fine: their source
+    # ladders are strong (door-open expert 114.86 > within 78.88 > cross 17.16)
+    # and their expert-vs-random gaps are +0.88 to +0.92.
+    #
+    # This is the fourth time in this project a threshold encoded an expectation
+    # rather than a measurement (Milestone 2's "expert 2x random", Milestone 4's
+    # four Window-Open-shaped checks, Milestone 6's "MAML beats scratch" filed as
+    # a sanity check, and now this). What the data actually has to satisfy is
+    # that the expert is recognisably expert -- which the gap check below tests
+    # in a scale-free way -- not that a scripted policy is flawless.
+    check("expert source is recognisably expert", srate.get("expert", 0) >= 0.5,
+          f"{srate.get('expert', float('nan')):.2f} "
+          f"(scripted policies are imperfect on the harder families; the "
+          f"discriminating test is the expert-vs-random gap below)")
     # Not "random never succeeds": drawer-close is easy enough that flailing shuts
     # the drawer about a quarter of the time, which is a property of the task.
     # What must hold is a clear gap between deliberate and undirected behavior.

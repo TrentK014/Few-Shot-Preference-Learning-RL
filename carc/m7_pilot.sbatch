@@ -2,7 +2,7 @@
 #SBATCH --job-name=fspref-m7pilot
 #SBATCH --account=biyik_1165
 #SBATCH --partition=gpu
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:a40:1
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8

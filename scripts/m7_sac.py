@@ -80,6 +80,34 @@ def evaluate(agent, env, n_episodes: int, seed: int, max_steps: int) -> float:
     return successes / max(n_episodes, 1)
 
 
+def usable_device(requested: str) -> str:
+    """Verify the device actually runs a matmul before the run commits to it.
+
+    CARC's gpu partition mixes generations, and the p100 (CC 6.0) and v100
+    (CC 7.0) nodes have no kernels in the installed torch build. Without this
+    check the job queues, starts, and only then dies inside the actor's first
+    forward pass with CUBLAS_STATUS_ARCH_MISMATCH. Falling back to CPU is much
+    better than losing the allocation: SAC on MetaWorld is small enough that CPU
+    is slow but not hopeless.
+    """
+    if not requested.startswith("cuda"):
+        return requested
+    if not torch.cuda.is_available():
+        print("WARNING: cuda requested but unavailable; falling back to cpu", flush=True)
+        return "cpu"
+    try:
+        a = torch.zeros(8, 8, device=requested)
+        _ = (a @ a).sum().item()
+        print(f"device check: {torch.cuda.get_device_name(0)} OK", flush=True)
+        return requested
+    except Exception as e:
+        print(f"WARNING: {torch.cuda.get_device_name(0)} cannot run matmuls with this "
+              f"torch build ({type(e).__name__}); falling back to cpu.\n"
+              f"  Request a supported GPU instead, e.g. --gres=gpu:a40:1 "
+              f"(a40/a100/l40s work; p100/v100 do not).", flush=True)
+        return "cpu"
+
+
 def run_arm(arm: str, args, maml, seed: int):
     """Train one arm for one seed. Returns a dict of curves and final metrics."""
     device = args.device
@@ -216,6 +244,8 @@ def main():
                    help="evaluations averaged into the reported final success rate")
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = p.parse_args()
+
+    args.device = usable_device(args.device)
 
     needs_ckpt = any(a in ("few_shot", "init") for a in args.arms)
     maml = None

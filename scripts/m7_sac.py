@@ -217,6 +217,9 @@ def main():
     p.add_argument("--arms", nargs="+",
                    default=["sac_oracle", "few_shot", "init", "pebble"])
     p.add_argument("--seeds", type=int, default=3)
+    p.add_argument("--seed-offset", type=int, default=0,
+                   help="first seed index; lets an array job run one (arm, seed) per task "
+                        "and have the shards combine into one seed sweep")
     p.add_argument("--steps", type=int, default=500000)
     p.add_argument("--seed-steps", type=int, default=1000,
                    help="uniform-random actions before the policy takes over")
@@ -237,6 +240,9 @@ def main():
     p.add_argument("--ensemble", type=int, default=3)
     p.add_argument("--eval-every", type=int, default=10000)
     p.add_argument("--eval-episodes", type=int, default=10)
+    p.add_argument("--shard-tag", action="store_true",
+                   help="suffix output files with arm and seed offset, so array-job "
+                        "shards do not overwrite each other")
     p.add_argument("--oracle-floor", type=float, default=0.5,
                    help="success rate the ground-truth-reward arm must reach for the "
                         "run to be trustworthy; lower it only for short smoke runs")
@@ -275,8 +281,10 @@ def main():
     results: dict[str, list[dict]] = {}
     for arm in args.arms:
         print(f"########## {arm} ##########")
-        results[arm] = [run_arm(arm, args, maml, seed) for seed in range(args.seeds)]
-        with open(os.path.join(args.out, "m7_results.json"), "w") as f:
+        seeds = range(args.seed_offset, args.seed_offset + args.seeds)
+        results[arm] = [run_arm(arm, args, maml, seed) for seed in seeds]
+        tag = f"_{'-'.join(args.arms)}_s{args.seed_offset}" if args.shard_tag else ""
+        with open(os.path.join(args.out, f"m7_results{tag}.json"), "w") as f:
             json.dump({"args": vars(args), "results": results}, f, indent=2)
 
     # ------------------------------------------------------------------ report
@@ -293,7 +301,7 @@ def main():
         print(f"  {arm:<12s} {fin.mean():8.3f}+/-{fin.std():<6.3f} "
               f"{best.mean():8.3f}+/-{best.std():<6.3f} {fb:10d}")
 
-    with open(os.path.join(args.out, "m7_summary.json"), "w") as f:
+    with open(os.path.join(args.out, f"m7_summary{tag}.json"), "w") as f:
         json.dump(summary, f, indent=2)
 
     # ------------------------------------------------------------------ checks

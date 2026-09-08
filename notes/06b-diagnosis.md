@@ -99,6 +99,35 @@ inherently fatal; it bites at 1-of-3 dilution and evidently not at 1-of-10.**
    policy's replay buffer.
 4. Milestone 7 measures success rate, which is what the paper actually claims.
 
+## Interim result: the meta-learner stopped memorizing
+
+Meta-validation during the 10-family run (job 11795032, 200 meta-train / 50
+held-out tasks), against Milestone 5's 3-family run:
+
+| step | unadapted | adapted | gain |
+|---|---|---|---|
+| 1000 | 0.853 | 0.899 | +0.046 |
+| 2000 | 0.861 | 0.912 | +0.051 |
+| 3000 | 0.862 | 0.918 | +0.056 |
+| 4000 | 0.853 | 0.916 | +0.063 |
+| 5000 | 0.865 | 0.921 | **+0.065** |
+| M5 final (3 families) | 0.9401 | 0.9405 | **+0.0004** |
+
+This is the mechanism in cause 3, confirmed directly. With three families the
+meta-initialization climbed to 0.94 unadapted -- it had memorized three
+family-specific solutions -- and adaptation had nothing left to do. With ten it
+stays flat at ~0.86 across 5000 steps while the adapted score keeps climbing, so
+the inner loop is doing real and increasing work.
+
+That is what MAML is supposed to produce: not weights that are already right, but
+weights that move to the right place quickly. It is also why Milestone 5's
+headline "+0.24 at 8 labels" was really "pretrained features beat no features"
+rather than a statement about adaptation.
+
+Caveat: these are held-out *variations of seen families*, the Milestone 5 style
+of validation. The cross-family Window Close transfer that Milestone 6 failed is
+a separate measurement, and is what `runs/m6b_wc` reports.
+
 ## Hypotheses for the 10-family run
 
 - **H1b**: pretrained arms are at or below chance on the hard subset at the

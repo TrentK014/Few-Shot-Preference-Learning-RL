@@ -44,11 +44,29 @@ def main():
     p.add_argument("--no-stop-on-success", action="store_true",
                    help="run every episode to truncation instead of ending on success")
     p.add_argument("--max-steps", type=int, default=500)
+    p.add_argument("--allow-held-out", action="store_true",
+                   help=f"permit --task {HELD_OUT_TASK}. Milestone 6 only, and never into the "
+                        "pretraining root")
+    p.add_argument("--pretrain-root", default=None,
+                   help="path the held-out task may never be written into (defaults to a sibling "
+                        "'prefs' directory of --out-root)")
     args = p.parse_args()
 
-    if args.task == HELD_OUT_TASK:
+    if args.task == HELD_OUT_TASK and not args.allow_held_out:
         raise SystemExit(f"refusing to generate '{HELD_OUT_TASK}': it is the held-out task "
-                         "and must not enter MAML pretraining (Milestone 6 generates it separately)")
+                         "and must not enter MAML pretraining. Milestone 6 passes --allow-held-out "
+                         "and writes to a separate root.")
+    if args.task == HELD_OUT_TASK:
+        # Even with the flag, never let the held-out task land where meta-training looks.
+        out = os.path.abspath(args.out_root)
+        forbidden = os.path.abspath(args.pretrain_root) if args.pretrain_root else \
+            os.path.join(os.path.dirname(out), "prefs")
+        if out == forbidden or out.startswith(forbidden + os.sep):
+            raise SystemExit(f"refusing to write '{HELD_OUT_TASK}' into the pretraining root "
+                             f"{forbidden}: meta-training globs that directory, so this would leak "
+                             "the held-out task into the initialization")
+        print(f"NOTE: generating the HELD-OUT task '{HELD_OUT_TASK}' into {out} "
+              f"(pretraining root {forbidden} left untouched)")
 
     n_var_total = n_variations(args.task, args.mt1_seed)
     stop_on_success = not args.no_stop_on_success

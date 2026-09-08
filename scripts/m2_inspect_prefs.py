@@ -34,6 +34,10 @@ def main():
     p.add_argument("--root", default="data/prefs")
     p.add_argument("--task", default="window-open")
     p.add_argument("--max-files", type=int, default=0, help="0 = all")
+    p.add_argument("--pretrain-root", default=None,
+                   help="root that must never contain the held-out task; defaults to --root. "
+                        "Milestone 6 inspects the test root, where window-close SHOULD exist, "
+                        "so it points this at the pretraining root instead.")
     args = p.parse_args()
 
     paths = list_datasets(args.root, args.task)
@@ -43,11 +47,20 @@ def main():
         raise SystemExit(f"no datasets under {os.path.join(args.root, args.task)}")
     print(f"{len(paths)} variation files under {args.root}/{args.task}\n")
 
-    # ---- 7. held-out integrity, across the whole root, not just this task ----
+    # ---- 7. held-out integrity ----
+    # The claim is that the held-out task never entered PRETRAINING, not that it
+    # is absent from whatever directory is being inspected. Milestone 6 inspects
+    # the test root, where window-close is supposed to live.
     print("Held-out integrity")
-    all_paths = list_datasets(args.root)
-    leaked = [p_ for p_ in all_paths if HELD_OUT_TASK in p_]
-    check(f"no '{HELD_OUT_TASK}' dataset present", not leaked, ", ".join(leaked[:3]))
+    guard_root = args.pretrain_root or args.root
+    if os.path.isdir(guard_root):
+        leaked = [p_ for p_ in list_datasets(guard_root) if HELD_OUT_TASK in p_]
+        check(f"no '{HELD_OUT_TASK}' under the pretraining root {guard_root}",
+              not leaked, ", ".join(leaked[:3]))
+    else:
+        check(f"pretraining root {guard_root} exists to be checked", False)
+    if args.task == HELD_OUT_TASK:
+        print(f"  (inspecting the held-out task itself; it is expected here in {args.root})")
 
     agg = dict(n_pairs=0, n_label1=0, seg_ret=[], per_source={s: [] for s in SOURCES},
                succ_by_source={s: [] for s in SOURCES}, expert_vs_random=[], keys=set())

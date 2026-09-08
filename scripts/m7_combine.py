@@ -43,6 +43,9 @@ def main():
     p.add_argument("--out", default="runs/m7")
     p.add_argument("--expect-seeds", type=int, default=3)
     p.add_argument("--oracle-floor", type=float, default=0.5)
+    p.add_argument("--success-threshold", type=float, default=1.0,
+                   help="success rate that counts as solving the task, for the "
+                        "query-efficiency comparison")
     args = p.parse_args()
 
     shards = sorted(glob.glob(os.path.join(args.out, "m7_results_*.json")))
@@ -74,6 +77,34 @@ def main():
                             feedback=fb, n_seeds=len(fin))
         print(f"  {arm:<12s} {fin.mean():8.3f}+/-{fin.std():<6.3f} "
               f"{best.mean():8.3f}+/-{best.std():<6.3f} {fb:10d} {len(fin):6d}")
+
+    # ------------------------------------------------------- query efficiency
+    # The discriminating metric. Several arms saturate at 1.00 final success on
+    # Window Close, so "did it solve the task" separates nothing; the paper's
+    # claim is about how much feedback it takes to get there. For each seed, the
+    # first evaluation reaching `--success-threshold`, and the feedback spent by
+    # that point. Seeds that never reach it are reported separately rather than
+    # folded in as a large number, which would silently reward failure.
+    print(f"\n  query efficiency: first evaluation reaching "
+          f"{args.success_threshold:.0%} success\n")
+    print(f"  {'arm':<12s} {'steps':>18s} {'queries':>18s} {'solved':>8s}")
+    for arm in arms:
+        steps_to, q_to = [], []
+        for r in results[arm]:
+            hit = next((c for c in r["curve"] if c[1] >= args.success_threshold), None)
+            if hit:
+                steps_to.append(hit[0]); q_to.append(hit[2])
+        n_solved = len(steps_to)
+        summary[arm]["n_solved"] = n_solved
+        if n_solved:
+            summary[arm]["steps_to_success"] = float(np.mean(steps_to))
+            summary[arm]["queries_to_success"] = float(np.mean(q_to))
+            solved = f"{n_solved}/{len(results[arm])}"
+            print(f"  {arm:<12s} {np.mean(steps_to):10.0f}+/-{np.std(steps_to):<7.0f}"
+                  f"{np.mean(q_to):11.1f}+/-{np.std(q_to):<7.1f}{solved:>8s}")
+        else:
+            solved = f"0/{len(results[arm])}"
+            print(f"  {arm:<12s} {'never':>18s}{'never':>19s}{solved:>8s}")
 
     # Success-rate curves, so the query-efficiency claim can be read off directly.
     print("\n  success rate vs environment steps (mean over seeds)\n")
@@ -110,10 +141,25 @@ def main():
     print("\n" + "=" * 78 + "\nHYPOTHESES (findings, not pass/fail)\n")
     if "few_shot" in summary and "pebble" in summary:
         d = summary["few_shot"]["final_mean"] - summary["pebble"]["final_mean"]
-        finding("H10 few-shot beats PEBBLE at the same query budget "
-                "(the paper's central claim)", d > 0,
+        finding("H10 few-shot beats PEBBLE on final success at the same query budget",
+                d > 0,
                 f"{summary['few_shot']['final_mean']:.3f} vs "
                 f"{summary['pebble']['final_mean']:.3f} ({d:+.3f}) at {max_feedback} queries")
+        # The sharper form, and the one the paper actually argues: same
+        # performance, fewer queries. Only meaningful if both arms solve it.
+        fq = summary["few_shot"].get("queries_to_success")
+        pq = summary["pebble"].get("queries_to_success")
+        if fq is not None and pq is not None:
+            finding("H10b few-shot needs FEWER queries than PEBBLE to solve the task "
+                    "(the paper's central claim)", fq < pq,
+                    f"{fq:.1f} vs {pq:.1f} queries "
+                    f"({summary['few_shot']['n_solved']}/{summary['pebble']['n_solved']} "
+                    f"seeds solved)")
+        else:
+            finding("H10b few-shot needs FEWER queries than PEBBLE to solve the task",
+                    fq is not None and pq is None,
+                    f"few_shot solved {summary['few_shot'].get('n_solved', 0)} seeds, "
+                    f"pebble solved {summary['pebble'].get('n_solved', 0)}")
     if "few_shot" in summary and "init" in summary:
         d = summary["few_shot"]["final_mean"] - summary["init"]["final_mean"]
         finding("H11 re-adaptation beats plain fine-tuning (few_shot > Init)", d > 0,

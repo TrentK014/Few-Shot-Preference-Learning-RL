@@ -253,6 +253,19 @@ def main():
 
     args.device = usable_device(args.device)
 
+    # PreferenceDataset stores replay-buffer INDICES, not materialized segments,
+    # because the reward model is re-adapted on the entire label history every
+    # session and the buffer already holds the observations. That is only sound
+    # while the ring buffer has not wrapped: once it does, a stored index points
+    # at a transition that has been overwritten, and every old label silently
+    # re-attaches to an unrelated segment. Nothing would crash and the run would
+    # look fine, so make it impossible rather than merely unlikely.
+    if args.buffer_size < args.steps:
+        raise SystemExit(
+            f"--buffer-size ({args.buffer_size}) must be >= --steps ({args.steps}): "
+            "preference labels are stored as buffer indices, so a wrapped buffer "
+            "would silently corrupt the label history.")
+
     needs_ckpt = any(a in ("few_shot", "init") for a in args.arms)
     maml = None
     if needs_ckpt:

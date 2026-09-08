@@ -111,6 +111,13 @@ class PreferenceDataset:
     Storing indices rather than materialized segments matters: the reward model
     is re-adapted on the full history every session, so the same pairs are
     re-gathered many times, and the buffer already holds the observations.
+
+    This is only valid while the replay buffer has NOT wrapped. Once it does, a
+    stored index names a transition that has since been overwritten, and every
+    earlier label silently re-attaches to an unrelated segment -- no exception,
+    no visible symptom, just a quietly corrupted preference history. The caller
+    is responsible for sizing the buffer to at least the step budget;
+    `scripts/m7_sac.py` refuses to start otherwise.
     """
 
     def __init__(self, device="cpu", segment_size=SEGMENT_SIZE):

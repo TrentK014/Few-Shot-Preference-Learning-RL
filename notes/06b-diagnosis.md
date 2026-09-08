@@ -148,3 +148,71 @@ a separate measurement, and is what `runs/m6b_wc` reports.
 
 Results land in `runs/m6b_wc`, `runs/m6b_wc_hardregime`, `runs/m7` and
 `runs/m7_3family`.
+
+---
+
+# RESULT: the 10-family prior reverses Milestone 6
+
+Job 11797299, 5 Window Close variations x 5 draws x 7 budgets, evaluated on
+held-out episodes. The 3-family column merges the Milestone 6 runs.
+
+## Full distribution: the main hypothesis is confirmed
+
+MAML minus scratch:
+
+| labels | 3-family | 10-family | change |
+|---|---|---|---|
+| 4 | +0.062 | **+0.172** | +0.110 |
+| 8 | +0.025 | **+0.115** | +0.090 |
+| 16 | +0.016 | **+0.087** | +0.072 |
+| 25 | -0.015 | **+0.071** | +0.086 |
+| 50 | +0.000 | **+0.057** | +0.057 |
+| 100 | +0.006 | **+0.039** | +0.033 |
+| 200 | +0.001 | **+0.030** | +0.029 |
+
+Positive at every budget, roughly 3x larger at 4 labels, and monotone decreasing
+in budget -- the shape few-shot learning predicts. **H0, the project's main
+question, is CONFIRMED** where Milestone 6 refuted it. H5 (largest advantage at
+the smallest budget) is confirmed. H4 is confirmed for the first time: MAML at
+200 labels reaches 0.9177 against the 0.8800 hand-distance heuristic, a bar the
+3-family prior never cleared.
+
+The unadapted meta-init also improved, 0.7136 -> 0.7968.
+
+## Hard subset: the harm is fixed, the advantage is not
+
+| labels | 3-family | 10-family | p (10-family) |
+|---|---|---|---|
+| 4 | -0.181 | -0.039 | 0.39 |
+| 8 | -0.125 | +0.017 | 0.51 |
+| 16 | -0.099 | +0.000 | 1.00 |
+| 25 | -0.121 | +0.007 | 0.81 |
+| 50 | -0.086 | +0.011 | 0.53 |
+| 100 | -0.048 | -0.010 | 0.35 |
+| 200 | -0.047 | +0.000 | 0.99 |
+
+**H1b CONFIRMED**: the pretrained arms are no longer below chance. Init at 4
+labels went 0.3858 -> 0.5149. The pathology that made the 3-family prior a
+liability is gone.
+
+**H7 REFUTED**: MAML does not *beat* scratch on the hard subset. Every gap is
+within noise (all p > 0.35). Prior breadth removed the harm without creating an
+advantage.
+
+## What this means
+
+The honest reading is that the ten-family prior does two different things:
+
+1. It stops the prior being wrong. With three families, one of which was Window
+   Close's exact reverse, the meta-init carried a confidently backwards belief
+   that few labels could not overturn -- visible as below-chance hard-subset
+   accuracy. With ten, that belief is diluted and the deficit disappears.
+2. It does not buy genuine task understanding. Where the hand-distance shortcut
+   is uninformative, MAML and scratch are indistinguishable. The large
+   full-distribution gains therefore come from the prior making better use of the
+   shortcut-informative pairs, not from knowing more about Window Close.
+
+Both halves are worth reporting. The first vindicates the diagnosis; the second
+says prior breadth is not sufficient for the deeper claim, and points at the next
+test -- whether the same holds on ML10 test tasks that have no reversed sibling
+in the prior set (Stage 3).

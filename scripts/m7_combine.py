@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 FAILS: list[str] = []
 FINDINGS: list[tuple[str, bool, str]] = []
-PREFERENCE_ARMS = ("few_shot", "init", "pebble")
+PREFERENCE_ARMS = ("few_shot", "init", "init_reset", "pebble")
 
 
 def check(name, ok, detail=""):
@@ -61,7 +61,8 @@ def main():
         for arm, runs in blob["results"].items():
             results.setdefault(arm, []).extend(runs)
 
-    arms = [a for a in ("sac_oracle", "few_shot", "init", "pebble") if a in results]
+    arms = [a for a in ("sac_oracle", "few_shot", "init", "init_reset", "pebble")
+            if a in results]
     print(f"merged {len(shards)} shards | arms {arms} | "
           f"{ {a: len(results[a]) for a in arms} } runs")
 

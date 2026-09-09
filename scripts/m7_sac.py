@@ -44,7 +44,7 @@ from fspref.sac import BATCH_SIZE, SAC, ReplayBuffer  # noqa: E402
 FAILS: list[str] = []
 FINDINGS: list[tuple[str, bool, str]] = []
 
-PREFERENCE_ARMS = ("few_shot", "init", "pebble")
+PREFERENCE_ARMS = ("few_shot", "init", "init_reset", "pebble")
 
 
 def check(name, ok, detail=""):
@@ -245,7 +245,11 @@ def main():
     p.add_argument("--variation", type=int, default=0)
     p.add_argument("--mt1-seed", type=int, default=0)
     p.add_argument("--arms", nargs="+",
-                   default=["sac_oracle", "few_shot", "init", "pebble"])
+                   choices=["sac_oracle", "few_shot", "init", "init_reset", "pebble"],
+                   default=["sac_oracle", "few_shot", "init", "pebble"],
+                   help="init is the paper's baseline (pretrained weights once, then "
+                        "fine-tune); init_reset resets to the meta-init every session, "
+                        "which isolates learned inner rates vs plain Adam")
     p.add_argument("--seeds", type=int, default=3)
     p.add_argument("--seed-offset", type=int, default=0,
                    help="first seed index; lets an array job run one (arm, seed) per task "
@@ -296,7 +300,7 @@ def main():
             "preference labels are stored as buffer indices, so a wrapped buffer "
             "would silently corrupt the label history.")
 
-    needs_ckpt = any(a in ("few_shot", "init") for a in args.arms)
+    needs_ckpt = any(a in ("few_shot", "init", "init_reset") for a in args.arms)
     maml = None
     if needs_ckpt:
         if not args.checkpoint:

@@ -153,18 +153,30 @@ def readapt(mode: str, maml, prev_net, dataset, buffer, ensemble_size=3,
             target_acc=TARGET_SUPPORT_ACC):
     """Rebuild the reward model on all feedback so far. Returns (net, info).
 
-    The three modes are the paper's three preference-learning arms, and they
-    differ only in where the weights start:
+    Where the weights start is the only thing that separates these arms, and it
+    is the whole experiment:
 
-        few_shot  reset to the meta-init, adapt with learned inner rates,
-                  fall back to Adam if 40 steps do not reach 95%
-        init      reset to the meta-init, plain Adam
-        pebble    fresh random weights, plain Adam (no prior data at all)
+        few_shot    reset to the meta-init, adapt with learned inner rates,
+                    fall back to Adam if 40 steps do not reach 95%
+        init        pretrained weights ONCE, then keep fine-tuning them
+        init_reset  reset to the meta-init every session, then plain Adam
+        pebble      fresh random weights every session, plain Adam
 
-    `prev_net` is unused by design. Every mode rebuilds from its own starting
-    point rather than continuing the previous session's weights, because the
-    optimal reward function shifts as the policy improves and the paper found
-    that carrying stale weights forward is what holds Init back.
+    `init` is the paper's baseline and is deliberately denied the reset: "Instead
+    of re-adapting the reward model each time new feedback is collected, we
+    initialize the reward model with the pretrained weights, and then perform
+    standard updates with the Adam optimizer as in PEBBLE" (Section 4.1). It
+    exists to isolate the paper's central algorithmic claim -- that resetting and
+    re-adapting each session is what makes the prior pay off, because the reward
+    implied by the accumulated preferences drifts as the policy improves. So it
+    continues from `prev_net` on every session after the first.
+
+    An earlier version of this function reset `init` every session, which handed
+    it exactly the mechanism it is supposed to lack and made it a strictly
+    stronger baseline than the paper's. `init_reset` preserves that behaviour
+    under an honest name, because it does answer a real question: with the reset
+    held fixed for both arms, do the learned per-parameter inner rates buy
+    anything over plain Adam?
     """
     support = dataset.batch(buffer)
     if mode == "pebble":
@@ -176,10 +188,16 @@ def readapt(mode: str, maml, prev_net, dataset, buffer, ensemble_size=3,
     if maml is None:
         raise ValueError(f"mode '{mode}' needs a meta-initialization checkpoint")
 
-    if mode == "init":
-        net = maml.as_reward_ensemble(maml.init_params())
+    if mode in ("init", "init_reset"):
+        if mode == "init_reset" or prev_net is None:
+            # init_reset always restarts; init restarts only on the first session,
+            # because it has no pretrained-but-fine-tuned weights to continue from.
+            net = maml.as_reward_ensemble(maml.init_params())
+        else:
+            net = prev_net          # the paper's Init: keep fine-tuning
         net, steps, acc = train_on_support(net, support, lr=lr, target_acc=target_acc)
-        return net, dict(steps=steps, support_acc=acc, fallback=False)
+        return net, dict(steps=steps, support_acc=acc, fallback=False,
+                         continued=(mode == "init" and prev_net is not None))
 
     if mode == "few_shot":
         params = maml.adapt(support, steps=max_maml_steps, target_acc=target_acc)

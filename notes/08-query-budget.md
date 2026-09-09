@@ -44,6 +44,30 @@ The two tables disagree in a way that explains all three. At budget 25, **all
 three few-shot seeds reach 100% success** and the final score is still 0.222.
 The policy finds the behavior and then loses it.
 
+## PEBBLE does not merely lose the behavior -- it never finds it
+
+The per-budget reports carry a `best` column the curve table above does not:
+
+**Budget 25**
+
+| arm | final | best ever | solved | first reached |
+|---|---|---|---|---|
+| few_shot | 0.222 | **1.000** | 3/3 | 123k steps |
+| init | 0.000 | **1.000** | 3/3 | 57k steps |
+| pebble | 0.000 | **0.000** | **0/3** | **never** |
+
+PEBBLE's *best* is 0.000. Across 3 seeds and 500k steps at 25 queries -- and
+again at 50 -- it never once reached success at any evaluation. This is not
+"reached it and drifted off", which is what happens to the pretrained arms. It is
+never finding the behavior at all.
+
+So at low budgets the prior is not a marginal head start. It is the difference
+between finding Window Close and not finding it.
+
+Note also that `init` reaches success *faster* than `few_shot` here (57k vs 123k
+steps) and then ends at 0.000 against few_shot's 0.222 -- the same
+speed-versus-stability split Milestone 7 found, appearing again independently.
+
 ## What the budget actually buys
 
 Success trajectories for few_shot seed0, sampled every 50k steps:

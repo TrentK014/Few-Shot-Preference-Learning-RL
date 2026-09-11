@@ -113,3 +113,49 @@ so single-cell differences are noisy -- the 100-query row in particular is not
 cleanly ordered. The claims that survive that noise are the two extremes: PEBBLE
 never solving Window Close at 25 or 50 queries (0/6 runs), and every arm holding
 1.000 only at 200.
+
+---
+
+# CORRECTION: the Init column above used the buggy Init
+
+The `init` numbers in the tables above came from the arm that reset to the
+meta-init every feedback session, which is the mechanism the paper's Init is
+defined to lack (see the correction section in `notes/07-results.md`, and commit
+`6ca61b5`). Re-run as job 11846167, budgets 25/50/100.
+
+| budget | init (buggy, resets each session) | init (paper-faithful) |
+|---|---|---|
+| 25 | 0.000 +/- 0.000 (3/3 ever solved) | **0.222 +/- 0.314** (3/3) |
+| 50 | 0.000 +/- 0.000 (2/3) | 0.000 +/- 0.000 (**3/3**) |
+| 100 | 0.222 +/- 0.314 (3/3) | **1.000 +/- 0.000** (3/3) |
+
+The corrected Init is *better* at every budget here -- the opposite of the
+3-family Milestone 7 result, where removing the reset cost it 0.778 -> 0.556.
+
+A plausible mechanism, offered as a hypothesis rather than a finding: with very
+few labels, resetting to the meta-init each session refits a tiny preference set
+from scratch and overfits it, while continuing to fine-tune accumulates a more
+stable model across sessions. The reset should pay off only once there are
+enough labels that the stale weights are further from the right answer than the
+meta-init is. That predicts the crossover we see -- reset loses at 25-100 and
+wins at 200 with a weak prior.
+
+With three seeds and spreads up to +/-0.31 this is not established. It is worth
+writing down because it is testable: more seeds at 100 and 200 would settle it.
+
+## What does not change
+
+The Milestone 8 headline findings are untouched, because none of them involve
+Init:
+
+- PEBBLE never reaches success at 25 or 50 comparisons (0/6 runs), while the
+  pretrained arms do. **The prior buys discovery.**
+- Every arm reaches the task transiently at low budgets and only holds it at 200.
+  **The budget buys stability.**
+- few-shot solves with ~4x fewer comparisons than PEBBLE (25 vs 100).
+
+One number does move: at budget 100 the corrected Init reaches 1.000 while
+few_shot reaches 0.667. On this row Init beats few-shot. With +/-0.47 on
+few_shot's side that is inside the noise, but it should not be hidden -- the
+low-budget rows are not cleanly ordered between the two pretrained arms, and only
+the gap to PEBBLE is robust.

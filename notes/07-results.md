@@ -188,3 +188,77 @@ reliability gap, at a fixed 200-query budget, on one held-out task, with 3 seeds
 
 We do **not** reproduce the paper's 20x figure and do not claim it: that compares
 against PEBBLE's original 4000-query budget for Window Close, which we never ran.
+
+---
+
+# CORRECTION: the Init baseline was wrong, and what the fix showed
+
+`fspref/online.py::readapt` reset Init to the meta-init on every feedback
+session. The paper's Init is defined by *not* doing that ("Instead of re-adapting
+the reward model each time new feedback is collected, we initialize the reward
+model with the pretrained weights, and then perform standard updates with the
+Adam optimizer as in PEBBLE", Section 4.1). Our Init was therefore a stronger
+baseline than the paper's, and the original H11 verdict was mislabeled.
+
+Fixed in `6ca61b5`; the old behaviour is kept as a separate arm, `init_reset`,
+which turns the mistake into a useful three-way decomposition. Re-run as job
+11846167.
+
+## 10-family prior: the machinery does not matter
+
+| arm | final success | queries to solve |
+|---|---|---|
+| sac_oracle | 1.000 +/- 0.000 | 0 |
+| few_shot | 1.000 +/- 0.000 | 101.0 +/- 64.0 |
+| **init (corrected)** | **1.000 +/- 0.000** | 117.0 +/- 65.7 |
+| init_reset (old, buggy) | 1.000 +/- 0.000 | 122.3 +/- 52.6 |
+| pebble | 0.667 +/- 0.471 | 130.7 +/- 49.0 |
+
+Correcting Init changed almost nothing here: 122.3 -> 117.0 queries, both at
+1.000 final. **H11 is still REFUTED on final success**, and now for a reason we
+can trust rather than because the baseline was inflated.
+
+## 3-family prior: the machinery matters a lot
+
+| arm | final success | queries to solve |
+|---|---|---|
+| few_shot (reset + learned inner rates) | **1.000 +/- 0.000** | 103.7 +/- 68.4 |
+| init_reset (reset, plain Adam) | 0.778 +/- 0.314 | 85.0 +/- 7.8 |
+| **init (paper-faithful, no reset)** | **0.556 +/- 0.416** | 119.7 +/- 58.4 |
+
+Removing the reset made Init worse on both axes. Read as a decomposition:
+
+- no reset -> reset: 0.556 -> 0.778
+- reset -> reset + learned inner rates: 0.778 -> 1.000
+
+Both of the paper's algorithmic choices contribute, in the direction it claims.
+
+## The finding that survives
+
+**The algorithmic machinery only matters when the prior is weak.** With three
+prior families, removing the reset costs 0.222 of final success and removing the
+learned rates costs another 0.222. With ten families every variant reaches 1.000
+and the differences vanish into the noise.
+
+That is consistent with everything else here. Milestone 6b showed ten families
+make the meta-initialization genuinely adaptable rather than memorized; once the
+prior is that good, how you adapt it matters less. The paper's Init ablation was
+run against its own ten-task prior and still separated, which ours does not --
+plausibly because our PEBBLE-style baselines are stronger than theirs (ours
+solves Window Close at 100 queries where theirs needed 4000).
+
+## Honest limits
+
+Three seeds, and the 3-family final-success spread is +/-0.416. The ordering
+0.556 < 0.778 < 1.000 is directional, not significant. What is solid is the
+10-family row, where three independent arms all sit at exactly 1.000 +/- 0.000,
+and the original claim being withdrawn.
+
+## What the original claim should have said
+
+Commit `80fe9dc` reported "re-adaptation buys reliability, not speed" from
+few_shot 1.000 vs init 0.778 under the 3-family prior. Both arms reset, so that
+gap was learned-inner-rates versus plain Adam, not re-adaptation. The corrected
+statement: against the paper-faithful Init (0.556), few-shot's advantage is
++0.444, of which roughly half is the reset and half the learned rates -- and
+none of it is visible once the prior has ten families.
